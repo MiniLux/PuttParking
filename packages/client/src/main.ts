@@ -44,8 +44,8 @@ async function main() {
 
     loadingEl.style.display = "none";
 
-    const game = new Game(canvas, room);
     showLobbyUI(room);
+    const game = new Game(canvas, room);
 
     window.addEventListener("beforeunload", () => {
       game.dispose();
