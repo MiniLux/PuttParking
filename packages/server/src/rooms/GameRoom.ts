@@ -95,18 +95,7 @@ export class GameRoom extends Room<GameState> {
   }
 
   private checkAllReady() {
-    let allReady = true;
-    let playerCount = 0;
-    this.state.players.forEach((player: PlayerState) => {
-      if (!player.isSpectator) {
-        playerCount++;
-        if (!player.isReady) allReady = false;
-      }
-    });
-    // Auto-start when all players ready (min 1)
-    if (allReady && playerCount >= 1) {
-      this.startGame("windmill-woods");
-    }
+    // Ready state is visual only - host starts the game via start_game message
   }
 
   private startGame(courseId: string) {

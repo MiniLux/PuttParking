@@ -264,7 +264,9 @@ export class Game {
       if (isLocal) {
         player.listen("strokes", (strokes: number) => {
           this.localStrokes = strokes;
-          this.updateHUD();
+          if (document.getElementById("hud")) {
+            this.updateHUD();
+          }
         });
 
         player.powerUps.onChange(() => {

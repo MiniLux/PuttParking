@@ -1,28 +1,32 @@
-app = "putt-parking"
-primary_region = "iad"
+# fly.toml app configuration file generated for putt-parking on 2026-02-20T23:19:48+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'putt-parking'
+primary_region = 'iad'
 
 [build]
-  dockerfile = "Dockerfile"
-  # Dockerfile context is the monorepo root
-  # Deploy with: fly deploy --dockerfile packages/server/Dockerfile
+  dockerfile = 'Dockerfile'
 
 [env]
-  NODE_ENV = "production"
-  PORT = "2567"
+  NODE_ENV = 'production'
+  PORT = '2567'
 
 [http_service]
   internal_port = 2567
   force_https = true
-  auto_stop_machines = "suspend"
+  auto_stop_machines = 'suspend'
   auto_start_machines = true
   min_machines_running = 0
 
   [http_service.concurrency]
-    type = "connections"
+    type = 'connections'
     hard_limit = 250
     soft_limit = 200
 
 [[vm]]
-  memory = "256mb"
-  cpu_kind = "shared"
+  memory = '512mb'
+  cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 512
