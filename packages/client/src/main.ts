@@ -233,24 +233,32 @@ function showLobbyUI(room: any) {
     if (!playerList) return;
     let html = "";
     let playerCount = 0;
-    room.state.players.forEach((player: any, sessionId: string) => {
-      if (player.isSpectator) return;
-      playerCount++;
-      const isHost = sessionId === room.state.hostId;
-      const readyColor = player.isReady ? "#4CAF50" : "#555";
-      const readyText = player.isReady ? "READY" : "waiting";
-      html += `
-        <div style="display:flex; align-items:center; gap:10px; padding:6px 8px;
-          border-radius:8px; background:rgba(255,255,255,0.03); margin-bottom:4px;">
-          <img src="${player.avatarUrl}" style="width:28px; height:28px; border-radius:50%;
-            border:2px solid ${readyColor};" onerror="this.style.display='none'" />
-          <div style="flex:1; text-align:left;">
-            <div style="font-size:13px; font-weight:500;">${player.username}${isHost ? ' <span style="font-size:10px; background:#FFD700; color:#000; padding:1px 5px; border-radius:4px; font-weight:700; margin-left:4px;">HOST</span>' : ""}</div>
+
+    // Use keys iteration for broader Colyseus compatibility
+    const players = room.state.players;
+    if (players) {
+      for (const sessionId of Object.keys(players)) {
+        if (sessionId.startsWith("$")) continue; // skip internal Colyseus keys
+        const player = players[sessionId];
+        if (!player || player.isSpectator) continue;
+        playerCount++;
+        const isHost = sessionId === room.state.hostId;
+        const readyColor = player.isReady ? "#4CAF50" : "#555";
+        const readyText = player.isReady ? "READY" : "waiting";
+        html += `
+          <div style="display:flex; align-items:center; gap:10px; padding:6px 8px;
+            border-radius:8px; background:rgba(255,255,255,0.03); margin-bottom:4px;">
+            <img src="${player.avatarUrl || ""}" style="width:28px; height:28px; border-radius:50%;
+              border:2px solid ${readyColor};" onerror="this.style.display='none'" />
+            <div style="flex:1; text-align:left;">
+              <div style="font-size:13px; font-weight:500;">${player.username || "Player"}${isHost ? ' <span style="font-size:10px; background:#FFD700; color:#000; padding:1px 5px; border-radius:4px; font-weight:700; margin-left:4px;">HOST</span>' : ""}</div>
+            </div>
+            <div style="font-size:11px; font-weight:600; color:${readyColor};">${readyText}</div>
           </div>
-          <div style="font-size:11px; font-weight:600; color:${readyColor};">${readyText}</div>
-        </div>
-      `;
-    });
+        `;
+      }
+    }
+
     playerList.innerHTML =
       html ||
       '<div style="color:#555; padding:12px; font-size:13px;">Waiting for players...</div>';
@@ -266,8 +274,8 @@ function showLobbyUI(room: any) {
     }
   };
 
-  room.state.players.onAdd(() => updatePlayers());
-  room.state.players.onRemove(() => updatePlayers());
+  room.state.players.onAdd(() => setTimeout(updatePlayers, 50));
+  room.state.players.onRemove(() => setTimeout(updatePlayers, 50));
   setInterval(updatePlayers, 500);
 
   // Phase changes
