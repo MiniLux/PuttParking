@@ -7,13 +7,13 @@ export class CameraController {
 
   // Spherical coordinates around target
   private azimuth = 0; // horizontal angle (radians)
-  private elevation = 1.0; // vertical angle (radians), clamped
-  private distance = 4; // distance from target
+  private elevation = 0.8; // vertical angle (radians), clamped
+  private distance = 2; // distance from target
 
-  private minElevation = 0.3;
+  private minElevation = 0.2;
   private maxElevation = Math.PI / 2 - 0.05;
-  private minDistance = 2;
-  private maxDistance = 10;
+  private minDistance = 1;
+  private maxDistance = 6;
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.camera = camera;
@@ -34,8 +34,8 @@ export class CameraController {
 
     // Point camera towards the hole from the tee
     this.azimuth = Math.atan2(dx, dz);
-    this.elevation = 0.9;
-    this.distance = Math.max(4, dist * 0.9);
+    this.elevation = 0.8;
+    this.distance = Math.max(2.5, dist * 0.6);
 
     const midX = (teePosition.x + holePosition.x) / 2;
     const midZ = (teePosition.z + holePosition.z) / 2;
