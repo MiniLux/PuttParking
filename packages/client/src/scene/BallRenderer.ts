@@ -12,9 +12,6 @@ const PLAYER_COLORS = [
   0xff5722, // Deep Orange
 ];
 
-const TRAIL_LENGTH = 20;
-const TRAIL_MIN_DISTANCE = 0.01;
-
 interface BallData {
   mesh: THREE.Mesh;
   targetX: number;
@@ -24,11 +21,6 @@ interface BallData {
   currentY: number;
   currentZ: number;
   color: number;
-  trail: THREE.Line;
-  trailPositions: Float32Array;
-  trailIndex: number;
-  lastTrailX: number;
-  lastTrailZ: number;
 }
 
 export class BallRenderer {
@@ -53,23 +45,6 @@ export class BallRenderer {
     mesh.castShadow = true;
     this.scene.add(mesh);
 
-    // Trail
-    const trailPositions = new Float32Array(TRAIL_LENGTH * 3);
-    const trailGeometry = new THREE.BufferGeometry();
-    trailGeometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(trailPositions, 3),
-    );
-    trailGeometry.setDrawRange(0, 0);
-    const trailMaterial = new THREE.LineBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.4,
-      linewidth: 1,
-    });
-    const trail = new THREE.Line(trailGeometry, trailMaterial);
-    this.scene.add(trail);
-
     this.balls.set(id, {
       mesh,
       targetX: 0,
@@ -79,11 +54,6 @@ export class BallRenderer {
       currentY: 0,
       currentZ: 0,
       color,
-      trail,
-      trailPositions,
-      trailIndex: 0,
-      lastTrailX: 0,
-      lastTrailZ: 0,
     });
 
     return mesh;
@@ -95,9 +65,6 @@ export class BallRenderer {
       this.scene.remove(ball.mesh);
       ball.mesh.geometry.dispose();
       (ball.mesh.material as THREE.Material).dispose();
-      this.scene.remove(ball.trail);
-      ball.trail.geometry.dispose();
-      (ball.trail.material as THREE.Material).dispose();
       this.balls.delete(id);
     }
   }
@@ -121,11 +88,6 @@ export class BallRenderer {
       ball.currentY = y;
       ball.currentZ = z;
       ball.mesh.position.set(x, y, z);
-      // Reset trail on teleport
-      ball.trailIndex = 0;
-      ball.trail.geometry.setDrawRange(0, 0);
-      ball.lastTrailX = x;
-      ball.lastTrailZ = z;
     }
   }
 
@@ -147,25 +109,6 @@ export class BallRenderer {
       ball.currentY += (ball.targetY - ball.currentY) * lerpFactor;
       ball.currentZ += (ball.targetZ - ball.currentZ) * lerpFactor;
       ball.mesh.position.set(ball.currentX, ball.currentY, ball.currentZ);
-
-      // Update trail
-      const dx = ball.currentX - ball.lastTrailX;
-      const dz = ball.currentZ - ball.lastTrailZ;
-      if (dx * dx + dz * dz > TRAIL_MIN_DISTANCE * TRAIL_MIN_DISTANCE) {
-        const idx = ball.trailIndex % TRAIL_LENGTH;
-        ball.trailPositions[idx * 3] = ball.currentX;
-        ball.trailPositions[idx * 3 + 1] = ball.currentY + BALL_RADIUS * 0.5;
-        ball.trailPositions[idx * 3 + 2] = ball.currentZ;
-        ball.trailIndex++;
-        ball.lastTrailX = ball.currentX;
-        ball.lastTrailZ = ball.currentZ;
-
-        const count = Math.min(ball.trailIndex, TRAIL_LENGTH);
-        ball.trail.geometry.setDrawRange(0, count);
-        (
-          ball.trail.geometry.attributes.position as THREE.BufferAttribute
-        ).needsUpdate = true;
-      }
     }
   }
 

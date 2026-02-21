@@ -215,21 +215,36 @@ export class InputManager {
       this.powerFill.style.width = `${power * 100}%`;
     }
 
-    // Update aim arrow (project ball position to screen)
+    // Update aim arrow by projecting world-space aim direction to screen space
     if (this.aimArrow) {
-      const ballScreen = this.ballPosition.clone().project(this.camera);
       const rect = this.canvas.getBoundingClientRect();
-      const screenX = (ballScreen.x * 0.5 + 0.5) * rect.width;
-      const screenY = (-ballScreen.y * 0.5 + 0.5) * rect.height;
+
+      // Project ball position to screen
+      const ballScreen = this.ballPosition.clone().project(this.camera);
+      const bx = (ballScreen.x * 0.5 + 0.5) * rect.width;
+      const by = (-ballScreen.y * 0.5 + 0.5) * rect.height;
+
+      // Project a point in the aim direction (opposite of drag) to screen
+      const len = Math.sqrt(dx * dx + dz * dz) || 1;
+      const aimWorld = this.ballPosition
+        .clone()
+        .add(new THREE.Vector3((dx / len) * 0.5, 0, (dz / len) * 0.5));
+      const aimScreen = aimWorld.project(this.camera);
+      const ax = (aimScreen.x * 0.5 + 0.5) * rect.width;
+      const ay = (-aimScreen.y * 0.5 + 0.5) * rect.height;
+
+      // Screen-space angle from ball to aim point
+      const sdx = ax - bx;
+      const sdy = ay - by;
+      const screenAngle = Math.atan2(sdx, -sdy);
 
       const arrowLength = Math.min(power * 100, 100);
-      const angle = Math.atan2(-dx, -dz);
 
       this.aimArrow.style.display = "block";
-      this.aimArrow.style.left = `${screenX}px`;
-      this.aimArrow.style.top = `${screenY - arrowLength}px`;
+      this.aimArrow.style.left = `${bx}px`;
+      this.aimArrow.style.top = `${by - arrowLength}px`;
       this.aimArrow.style.height = `${arrowLength}px`;
-      this.aimArrow.style.transform = `translateX(-50%) rotate(${-angle}rad)`;
+      this.aimArrow.style.transform = `translateX(-50%) rotate(${screenAngle}rad)`;
     }
   }
 
