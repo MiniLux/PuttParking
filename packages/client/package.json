@@ -11,7 +11,7 @@
   "dependencies": {
     "@discord/embedded-app-sdk": "^1.4.0",
     "@putt-parking/shared": "workspace:*",
-    "colyseus.js": "^0.15.0",
+    "partysocket": "^1.0.2",
     "three": "^0.170.0"
   },
   "devDependencies": {

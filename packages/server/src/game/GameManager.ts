@@ -1,6 +1,5 @@
-import type { Room } from "@colyseus/core";
-import type { GameState } from "../state/GameState.js";
-import type { PlayerState } from "../state/PlayerState.js";
+import type { RoomAdapter } from "../RoomAdapter.js";
+import type { PlayerData } from "../state/GameState.js";
 import { PhysicsWorld } from "../physics/PhysicsWorld.js";
 import { CourseBuilder } from "../physics/CourseBuilder.js";
 import { BallController } from "../physics/BallController.js";
@@ -16,7 +15,7 @@ import type { Hole, Course } from "@putt-parking/shared";
 import { PowerUpManager } from "./PowerUpManager.js";
 
 export class GameManager {
-  private room: Room<GameState>;
+  private room: RoomAdapter;
   private physics: PhysicsWorld;
   private courseBuilder: CourseBuilder;
   private ballController: BallController;
@@ -39,7 +38,7 @@ export class GameManager {
   private tournamentCourseIndex = 0;
   private isTournament = false;
 
-  constructor(room: Room<GameState>) {
+  constructor(room: RoomAdapter) {
     this.room = room;
     this.physics = new PhysicsWorld();
     this.courseBuilder = new CourseBuilder(this.physics);
@@ -66,12 +65,11 @@ export class GameManager {
     this.room.state.totalCourses = courses.length;
     this.room.state.courseIndex = 0;
 
-    // Reset all player scores for tournament
-    this.room.state.players.forEach((player: PlayerState) => {
+    for (const [, player] of Object.entries(this.room.state.players)) {
       if (!player.isSpectator) {
         player.totalStrokes = 0;
       }
-    });
+    }
 
     this.startTournamentCourse(0);
   }
@@ -106,28 +104,24 @@ export class GameManager {
     this.holeDetector = this.courseBuilder.getHoleDetector(this.currentHole);
 
     // Place all player balls at the tee
-    this.room.state.players.forEach(
-      (player: PlayerState, sessionId: string) => {
-        if (player.isSpectator) return;
-        player.strokes = 0;
-        player.hasFinishedHole = false;
-        player.isBallAtRest = true;
+    for (const [sessionId, player] of Object.entries(this.room.state.players)) {
+      if (player.isSpectator) continue;
+      player.strokes = 0;
+      player.hasFinishedHole = false;
+      player.isBallAtRest = true;
 
-        const tee = this.currentHole!.teePosition;
-        // Offset each player slightly so they don't stack
-        const offset = player.colorIndex * 0.05;
-        const x = tee.x + offset;
-        const y = tee.y + 0.05; // Slightly above ground
-        const z = tee.z;
+      const tee = this.currentHole!.teePosition;
+      const offset = player.colorIndex * 0.05;
+      const x = tee.x + offset;
+      const y = tee.y + 0.05;
+      const z = tee.z;
 
-        // Remove old ball and add new one
-        this.physics.removeBall(sessionId);
-        this.physics.addBall(sessionId, x, y, z);
-        player.ballX = x;
-        player.ballY = y;
-        player.ballZ = z;
-      },
-    );
+      this.physics.removeBall(sessionId);
+      this.physics.addBall(sessionId, x, y, z);
+      player.ballX = x;
+      player.ballY = y;
+      player.ballZ = z;
+    }
 
     this.previousPositions.clear();
 
@@ -146,12 +140,13 @@ export class GameManager {
       teePosition: this.currentHole.teePosition,
       holePosition: this.currentHole.holePosition,
     });
+
+    this.room.broadcastState();
   }
 
   private startPhysicsLoop() {
     this.stopPhysicsLoop();
 
-    const dt = 1 / TICK_RATE;
     let lastTime = Date.now();
 
     this.physicsInterval = setInterval(() => {
@@ -185,6 +180,7 @@ export class GameManager {
     this.stopTimer();
     this.timerInterval = setInterval(() => {
       this.room.state.holeTimeRemaining--;
+      this.room.broadcastState();
       if (this.room.state.holeTimeRemaining <= 0) {
         this.endHole();
       }
@@ -201,96 +197,99 @@ export class GameManager {
   private updateBallStates() {
     if (!this.currentHole || !this.holeDetector) return;
 
-    this.room.state.players.forEach(
-      (player: PlayerState, sessionId: string) => {
-        if (player.isSpectator || player.hasFinishedHole) return;
+    for (const [sessionId, player] of Object.entries(this.room.state.players)) {
+      if (player.isSpectator || player.hasFinishedHole) continue;
 
-        const ball = this.physics.getBall(sessionId);
-        if (!ball) return;
+      const ball = this.physics.getBall(sessionId);
+      if (!ball) continue;
 
-        const atRest = this.physics.isBallAtRest(sessionId);
-        player.isBallAtRest = atRest;
+      const atRest = this.physics.isBallAtRest(sessionId);
+      player.isBallAtRest = atRest;
 
-        // Check power-up pickups
-        this.powerUpManager.checkPickups(
-          sessionId,
+      // Check power-up pickups
+      this.powerUpManager.checkPickups(
+        sessionId,
+        ball.position.x,
+        ball.position.z,
+      );
+
+      // Check if ball fell off the course
+      if (ball.position.y < -2) {
+        const prev = this.previousPositions.get(sessionId);
+        const pos = prev || this.currentHole!.teePosition;
+        this.physics.setBallPosition(sessionId, pos.x, pos.y + 0.05, pos.z);
+        player.strokes++;
+      }
+
+      // Store position when ball is at rest (for out-of-bounds reset)
+      if (atRest && ball.position.y > -1) {
+        this.previousPositions.set(sessionId, {
+          x: ball.position.x,
+          y: ball.position.y,
+          z: ball.position.z,
+        });
+      }
+
+      // Check hole-in
+      const velocity = ball.velocity.length();
+      if (
+        this.holeDetector!(
           ball.position.x,
+          ball.position.y,
           ball.position.z,
-        );
+          velocity,
+        )
+      ) {
+        player.hasFinishedHole = true;
+        player.isBallAtRest = true;
+        this.physics.setBallPosition(sessionId, 0, -10, 0);
 
-        // Check if ball fell off the course
-        if (ball.position.y < -2) {
-          // Reset to previous position or tee
-          const prev = this.previousPositions.get(sessionId);
-          const pos = prev || this.currentHole!.teePosition;
-          this.physics.setBallPosition(sessionId, pos.x, pos.y + 0.05, pos.z);
-          player.strokes++; // Penalty stroke
-        }
+        this.room.broadcast("hole_in", {
+          playerId: sessionId,
+          username: player.username,
+          strokes: player.strokes,
+        });
 
-        // Store position when ball is at rest (for out-of-bounds reset)
-        if (atRest && ball.position.y > -1) {
-          this.previousPositions.set(sessionId, {
-            x: ball.position.x,
-            y: ball.position.y,
-            z: ball.position.z,
-          });
-        }
+        this.checkAllFinished();
+      }
 
-        // Check hole-in
-        const velocity = ball.velocity.length();
-        if (
-          this.holeDetector!(
-            ball.position.x,
-            ball.position.y,
-            ball.position.z,
-            velocity,
-          )
-        ) {
-          player.hasFinishedHole = true;
-          player.isBallAtRest = true;
-          // Hide ball by moving it underground
-          this.physics.setBallPosition(sessionId, 0, -10, 0);
-
-          this.room.broadcast("hole_in", {
-            playerId: sessionId,
-            username: player.username,
-            strokes: player.strokes,
-          });
-
-          // Check if all players finished
-          this.checkAllFinished();
-        }
-
-        // Check max strokes
-        if (player.strokes >= MAX_STROKES_PER_HOLE && atRest) {
-          player.hasFinishedHole = true;
-          this.physics.setBallPosition(sessionId, 0, -10, 0);
-          this.checkAllFinished();
-        }
-      },
-    );
+      // Check max strokes
+      if (player.strokes >= MAX_STROKES_PER_HOLE && atRest) {
+        player.hasFinishedHole = true;
+        this.physics.setBallPosition(sessionId, 0, -10, 0);
+        this.checkAllFinished();
+      }
+    }
   }
 
   private syncBallPositions() {
-    this.room.state.players.forEach(
-      (player: PlayerState, sessionId: string) => {
-        if (player.isSpectator || player.hasFinishedHole) return;
-        const ball = this.physics.getBall(sessionId);
-        if (!ball) return;
-        player.ballX = ball.position.x;
-        player.ballY = ball.position.y;
-        player.ballZ = ball.position.z;
-      },
-    );
+    const balls: Record<string, { x: number; y: number; z: number }> = {};
+
+    for (const [sessionId, player] of Object.entries(this.room.state.players)) {
+      if (player.isSpectator || player.hasFinishedHole) continue;
+      const ball = this.physics.getBall(sessionId);
+      if (!ball) continue;
+      player.ballX = ball.position.x;
+      player.ballY = ball.position.y;
+      player.ballZ = ball.position.z;
+      balls[sessionId] = {
+        x: ball.position.x,
+        y: ball.position.y,
+        z: ball.position.z,
+      };
+    }
+
+    this.room.broadcast("ball_sync", { balls });
   }
 
   private checkAllFinished() {
     let allDone = true;
-    this.room.state.players.forEach((player: PlayerState) => {
+    for (const [, player] of Object.entries(this.room.state.players)) {
       if (!player.isSpectator && !player.hasFinishedHole) {
         allDone = false;
+        break;
       }
-    });
+    }
     if (allDone) {
       this.endHole();
     }
@@ -301,14 +300,14 @@ export class GameManager {
     this.stopTimer();
 
     // Add strokes to total - unfinished players get max strokes
-    this.room.state.players.forEach((player: PlayerState) => {
-      if (player.isSpectator) return;
+    for (const [, player] of Object.entries(this.room.state.players)) {
+      if (player.isSpectator) continue;
       if (!player.hasFinishedHole) {
         player.strokes = MAX_STROKES_PER_HOLE;
         player.hasFinishedHole = true;
       }
       player.totalStrokes += player.strokes;
-    });
+    }
 
     this.room.state.phase = "hole_review";
 
@@ -319,17 +318,15 @@ export class GameManager {
       strokes: number;
       total: number;
     }> = [];
-    this.room.state.players.forEach(
-      (player: PlayerState, sessionId: string) => {
-        if (player.isSpectator) return;
-        scores.push({
-          sessionId,
-          username: player.username,
-          strokes: player.strokes,
-          total: player.totalStrokes,
-        });
-      },
-    );
+    for (const [sessionId, player] of Object.entries(this.room.state.players)) {
+      if (player.isSpectator) continue;
+      scores.push({
+        sessionId,
+        username: player.username,
+        strokes: player.strokes,
+        total: player.totalStrokes,
+      });
+    }
     scores.sort((a, b) => a.total - b.total);
 
     this.room.broadcast("hole_end", {
@@ -337,6 +334,8 @@ export class GameManager {
       par: this.currentHole?.par || 3,
       scores,
     });
+
+    this.room.broadcastState();
 
     // After review period, start next hole
     setTimeout(() => {
@@ -359,16 +358,14 @@ export class GameManager {
       username: string;
       total: number;
     }> = [];
-    this.room.state.players.forEach(
-      (player: PlayerState, sessionId: string) => {
-        if (player.isSpectator) return;
-        scores.push({
-          sessionId,
-          username: player.username,
-          total: player.totalStrokes,
-        });
-      },
-    );
+    for (const [sessionId, player] of Object.entries(this.room.state.players)) {
+      if (player.isSpectator) continue;
+      scores.push({
+        sessionId,
+        username: player.username,
+        total: player.totalStrokes,
+      });
+    }
     scores.sort((a, b) => a.total - b.total);
 
     this.room.broadcast("course_end", {
@@ -378,7 +375,8 @@ export class GameManager {
       totalCourses: this.tournamentCourses.length,
     });
 
-    // In tournament mode, advance to next course after a delay
+    this.room.broadcastState();
+
     if (this.isTournament) {
       setTimeout(() => {
         this.startTournamentCourse(this.tournamentCourseIndex + 1);
@@ -396,23 +394,22 @@ export class GameManager {
       username: string;
       total: number;
     }> = [];
-    this.room.state.players.forEach(
-      (player: PlayerState, sessionId: string) => {
-        if (player.isSpectator) return;
-        scores.push({
-          sessionId,
-          username: player.username,
-          total: player.totalStrokes,
-        });
-      },
-    );
+    for (const [sessionId, player] of Object.entries(this.room.state.players)) {
+      if (player.isSpectator) continue;
+      scores.push({
+        sessionId,
+        username: player.username,
+        total: player.totalStrokes,
+      });
+    }
     scores.sort((a, b) => a.total - b.total);
 
     this.room.broadcast("tournament_end", { scores });
+    this.room.broadcastState();
   }
 
   handlePutt(sessionId: string, dirX: number, dirZ: number, power: number) {
-    const player = this.room.state.players.get(sessionId);
+    const player = this.room.getPlayer(sessionId);
     if (
       !player ||
       player.isSpectator ||
@@ -455,11 +452,10 @@ export class GameManager {
     targetPlayerId?: string,
   ) {
     if (powerUpId === "rewind") {
-      // Special handling: restore previous position
       const prev = this.previousPositions.get(sessionId);
       if (prev) {
         this.physics.setBallPosition(sessionId, prev.x, prev.y + 0.05, prev.z);
-        const player = this.room.state.players.get(sessionId);
+        const player = this.room.getPlayer(sessionId);
         if (player && player.strokes > 0) {
           player.strokes--;
         }

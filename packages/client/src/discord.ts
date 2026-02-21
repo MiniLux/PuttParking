@@ -16,12 +16,12 @@ export async function initDiscord(): Promise<{
 
   await discordSdk.ready();
 
-  // In production, patch URL mappings so fetch/WebSocket go through Discord's proxy
+  // In production, patch URL mappings so fetch goes through Discord's proxy
   if (import.meta.env.PROD) {
     patchUrlMappings([
       {
-        prefix: "/colyseus",
-        target: "putt-parking.fly.dev",
+        prefix: "/api",
+        target: import.meta.env.VITE_PARTYKIT_HOST,
       },
     ]);
   }
@@ -35,8 +35,13 @@ export async function initDiscord(): Promise<{
     scope: ["identify", "guilds"],
   });
 
-  // Exchange code for access token via our server
-  const tokenResponse = await fetch("/colyseus/api/token", {
+  // Exchange code for access token
+  // In dev, proxied through Vite to PartyKit; in prod, through Discord URL mapping
+  const tokenUrl = import.meta.env.PROD
+    ? `/api/parties/main/${discordSdk.channelId || "default"}/token`
+    : "/api/token";
+
+  const tokenResponse = await fetch(tokenUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code }),

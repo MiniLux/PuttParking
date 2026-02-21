@@ -1,6 +1,4 @@
-import type { Room } from '@colyseus/core';
-import type { GameState } from '../state/GameState.js';
-import type { PlayerState } from '../state/PlayerState.js';
+import type { RoomAdapter } from "../RoomAdapter.js";
 
 export interface HoleScore {
   sessionId: string;
@@ -11,27 +9,27 @@ export interface HoleScore {
 }
 
 export class ScoreManager {
-  private room: Room<GameState>;
-  private holeScores: Map<string, number[]> = new Map(); // sessionId -> strokes per hole
+  private room: RoomAdapter;
+  private holeScores: Map<string, number[]> = new Map();
 
-  constructor(room: Room<GameState>) {
+  constructor(room: RoomAdapter) {
     this.room = room;
   }
 
   recordHole(holeIndex: number, par: number) {
-    this.room.state.players.forEach((player: PlayerState, sessionId: string) => {
-      if (player.isSpectator) return;
+    for (const [sessionId, player] of Object.entries(this.room.state.players)) {
+      if (player.isSpectator) continue;
       if (!this.holeScores.has(sessionId)) {
         this.holeScores.set(sessionId, []);
       }
       this.holeScores.get(sessionId)!.push(player.strokes);
-    });
+    }
   }
 
   getHoleLeaderboard(par: number): HoleScore[] {
     const scores: HoleScore[] = [];
-    this.room.state.players.forEach((player: PlayerState, sessionId: string) => {
-      if (player.isSpectator) return;
+    for (const [sessionId, player] of Object.entries(this.room.state.players)) {
+      if (player.isSpectator) continue;
       scores.push({
         sessionId,
         username: player.username,
@@ -39,14 +37,14 @@ export class ScoreManager {
         total: player.totalStrokes,
         vsPar: player.strokes - par,
       });
-    });
+    }
     return scores.sort((a, b) => a.total - b.total);
   }
 
   getFinalLeaderboard(): HoleScore[] {
     const scores: HoleScore[] = [];
-    this.room.state.players.forEach((player: PlayerState, sessionId: string) => {
-      if (player.isSpectator) return;
+    for (const [sessionId, player] of Object.entries(this.room.state.players)) {
+      if (player.isSpectator) continue;
       scores.push({
         sessionId,
         username: player.username,
@@ -54,7 +52,7 @@ export class ScoreManager {
         total: player.totalStrokes,
         vsPar: 0,
       });
-    });
+    }
     return scores.sort((a, b) => a.total - b.total);
   }
 

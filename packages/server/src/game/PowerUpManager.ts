@@ -1,6 +1,5 @@
-import type { Room } from "@colyseus/core";
-import type { GameState } from "../state/GameState.js";
-import type { PlayerState } from "../state/PlayerState.js";
+import type { RoomAdapter } from "../RoomAdapter.js";
+import type { PlayerData } from "../state/GameState.js";
 import type { PhysicsWorld } from "../physics/PhysicsWorld.js";
 import {
   POWERUP_CATALOG,
@@ -25,13 +24,13 @@ interface SpawnedPowerUp {
 }
 
 export class PowerUpManager {
-  private room: Room<GameState>;
+  private room: RoomAdapter;
   private physics: PhysicsWorld;
   private activeEffects: ActiveEffect[] = [];
   private spawnedPowerUps: SpawnedPowerUp[] = [];
   private nextSpawnId = 0;
 
-  constructor(room: Room<GameState>, physics: PhysicsWorld) {
+  constructor(room: RoomAdapter, physics: PhysicsWorld) {
     this.room = room;
     this.physics = physics;
   }
@@ -54,21 +53,19 @@ export class PowerUpManager {
       });
     }
 
-    // Broadcast spawned power-ups to clients
-    this.room.broadcast(
-      "powerups_spawned",
-      this.spawnedPowerUps.map((s) => ({
+    this.room.broadcast("powerups_spawned", {
+      powerups: this.spawnedPowerUps.map((s) => ({
         id: s.id,
         powerUpId: s.powerUpId,
         x: s.x,
         y: s.y,
         z: s.z,
       })),
-    );
+    });
   }
 
   checkPickups(playerId: string, ballX: number, ballZ: number) {
-    const player = this.room.state.players.get(playerId);
+    const player = this.room.getPlayer(playerId);
     if (!player || player.powerUps.length >= MAX_POWERUPS_PER_PLAYER) return;
 
     for (const spawn of this.spawnedPowerUps) {
@@ -96,7 +93,7 @@ export class PowerUpManager {
     powerUpId: string,
     targetPlayerId?: string,
   ): boolean {
-    const player = this.room.state.players.get(playerId);
+    const player = this.room.getPlayer(playerId);
     if (!player) return false;
 
     const idx = player.powerUps.indexOf(powerUpId);
@@ -124,7 +121,6 @@ export class PowerUpManager {
         break;
 
       case "rewind": {
-        // Handled by GameManager - restore previous position
         this.room.broadcast("powerup_used", {
           playerId,
           powerUpId,
@@ -139,7 +135,6 @@ export class PowerUpManager {
         break;
 
       case "teleport":
-        // Client will send teleport position separately
         this.room.broadcast("powerup_used", {
           playerId,
           powerUpId,
@@ -152,7 +147,7 @@ export class PowerUpManager {
           playerId,
           (p) => {
             p.hasSuperSize = true;
-            p.ballRadius = 0.06; // 3x normal
+            p.ballRadius = 0.06;
           },
           "super_size",
           10,
@@ -164,7 +159,7 @@ export class PowerUpManager {
           playerId,
           (p) => {
             p.hasFunSize = true;
-            p.ballRadius = 0.007; // ~0.35x normal
+            p.ballRadius = 0.007;
           },
           "fun_size",
           10,
@@ -217,10 +212,10 @@ export class PowerUpManager {
 
       case "steal": {
         if (!targetPlayerId) return false;
-        const target = this.room.state.players.get(targetPlayerId);
+        const target = this.room.getPlayer(targetPlayerId);
         if (!target || target.powerUps.length === 0) return false;
         const stolenIdx = Math.floor(Math.random() * target.powerUps.length);
-        const stolen = target.powerUps.at(stolenIdx);
+        const stolen = target.powerUps[stolenIdx];
         if (!stolen) return false;
         target.powerUps.splice(stolenIdx, 1);
         player.powerUps.push(stolen);
@@ -260,19 +255,17 @@ export class PowerUpManager {
 
   private applyToOpponents(
     userId: string,
-    apply: (p: PlayerState) => void,
+    apply: (p: PlayerData) => void,
     powerUpId: PowerUpId,
     duration: number | undefined,
   ) {
-    this.room.state.players.forEach(
-      (player: PlayerState, sessionId: string) => {
-        if (sessionId === userId || player.isSpectator) return;
-        apply(player);
-        if (duration) {
-          this.addTimedEffect(sessionId, powerUpId, duration);
-        }
-      },
-    );
+    for (const [sessionId, player] of Object.entries(this.room.state.players)) {
+      if (sessionId === userId || player.isSpectator) continue;
+      apply(player);
+      if (duration) {
+        this.addTimedEffect(sessionId, powerUpId, duration);
+      }
+    }
   }
 
   private addTimedEffect(
@@ -299,7 +292,7 @@ export class PowerUpManager {
   }
 
   private removeEffect(playerId: string, powerUpId: PowerUpId) {
-    const player = this.room.state.players.get(playerId);
+    const player = this.room.getPlayer(playerId);
     if (!player) return;
 
     switch (powerUpId) {

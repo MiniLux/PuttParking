@@ -1,4 +1,4 @@
-import type { Room } from "colyseus.js";
+import type { StateManager } from "../state/StateManager.js";
 import { SceneManager } from "../scene/SceneManager.js";
 import { CourseRenderer } from "../scene/CourseRenderer.js";
 import { BallRenderer } from "../scene/BallRenderer.js";
@@ -6,7 +6,13 @@ import { PowerUpRenderer } from "../scene/PowerUpRenderer.js";
 import { EffectsManager } from "../scene/EffectsManager.js";
 import { CameraController } from "./CameraController.js";
 import { InputManager } from "./InputManager.js";
-import { sendPutt, sendUsePowerUp } from "../network.js";
+import {
+  sendPutt,
+  sendUsePowerUp,
+  send,
+  getSessionId,
+  onMessage,
+} from "../network.js";
 import { AudioManager } from "../audio/AudioManager.js";
 import { POWERUP_CATALOG } from "@putt-parking/shared";
 
@@ -19,7 +25,7 @@ export class Game {
   private cameraController: CameraController;
   private inputManager: InputManager;
   private audio: AudioManager;
-  private room: Room;
+  private stateManager: StateManager;
   private localSessionId: string;
   private animationId: number = 0;
   private lastTime: number = 0;
@@ -30,9 +36,9 @@ export class Game {
   private localStrokes = 0;
   private totalHoles = 6;
 
-  constructor(canvas: HTMLCanvasElement, room: Room) {
-    this.room = room;
-    this.localSessionId = room.sessionId;
+  constructor(canvas: HTMLCanvasElement, stateManager: StateManager) {
+    this.stateManager = stateManager;
+    this.localSessionId = getSessionId();
 
     this.sceneManager = new SceneManager(canvas);
     this.courseRenderer = new CourseRenderer(this.sceneManager.scene);
@@ -121,10 +127,10 @@ export class Game {
       display: flex; align-items: center; justify-content: center;
       transition: background 0.2s; pointer-events: auto;
     `;
-    btn.textContent = "♪";
+    btn.textContent = "\u266A";
     btn.addEventListener("click", () => {
       const muted = this.audio.toggleMute();
-      btn.textContent = muted ? "♪̸" : "♪";
+      btn.textContent = muted ? "\u266A\u0338" : "\u266A";
       btn.style.opacity = muted ? "0.5" : "1";
     });
     document.getElementById("ui-overlay")!.appendChild(btn);
@@ -165,15 +171,17 @@ export class Game {
   }
 
   private showTargetSelector(powerUpId: string) {
-    // Remove existing selector
     document.getElementById("target-selector")?.remove();
+
+    const state = this.stateManager.getState();
+    if (!state) return;
 
     const opponents: Array<{
       sessionId: string;
       username: string;
       avatarUrl: string;
     }> = [];
-    this.room.state.players.forEach((p: any, sid: string) => {
+    for (const [sid, p] of Object.entries(state.players)) {
       if (sid !== this.localSessionId && !p.isSpectator) {
         opponents.push({
           sessionId: sid,
@@ -181,7 +189,7 @@ export class Game {
           avatarUrl: p.avatarUrl,
         });
       }
-    });
+    }
 
     if (opponents.length === 0) return;
     if (opponents.length === 1) {
@@ -220,7 +228,6 @@ export class Game {
       selector.appendChild(opt);
     }
 
-    // Close on click outside
     const closeHandler = (e: MouseEvent) => {
       if (!selector.contains(e.target as Node)) {
         selector.remove();
@@ -234,7 +241,7 @@ export class Game {
 
   private setupStateListeners() {
     // Player join/leave
-    this.room.state.players.onAdd((player: any, sessionId: string) => {
+    this.stateManager.onAdd((player, sessionId) => {
       if (player.isSpectator) return;
       const isLocal = sessionId === this.localSessionId;
       this.ballRenderer.addBall(sessionId, player.colorIndex, isLocal);
@@ -245,74 +252,127 @@ export class Game {
         player.ballZ,
       );
 
-      player.listen("ballX", () => this.updateBallTarget(sessionId, player));
-      player.listen("ballY", () => this.updateBallTarget(sessionId, player));
-      player.listen("ballZ", () => this.updateBallTarget(sessionId, player));
+      // Listen for per-player state changes
+      this.stateManager.listenPlayer(
+        sessionId,
+        "isBallAtRest",
+        (atRest: boolean) => {
+          if (sessionId === this.localSessionId) {
+            const p = this.stateManager.getPlayer(sessionId);
+            this.inputManager.setCanPutt(atRest && !!p && !p.hasFinishedHole);
+          }
+        },
+      );
 
-      player.listen("isBallAtRest", (atRest: boolean) => {
-        if (sessionId === this.localSessionId) {
-          this.inputManager.setCanPutt(atRest && !player.hasFinishedHole);
-        }
-      });
-
-      player.listen("hasFinishedHole", (finished: boolean) => {
-        if (finished) {
-          this.ballRenderer.setPosition(sessionId, 0, -10, 0);
-        }
-      });
+      this.stateManager.listenPlayer(
+        sessionId,
+        "hasFinishedHole",
+        (finished: boolean) => {
+          if (finished) {
+            this.ballRenderer.setPosition(sessionId, 0, -10, 0);
+          }
+        },
+      );
 
       if (isLocal) {
-        player.listen("strokes", (strokes: number) => {
-          this.localStrokes = strokes;
-          if (document.getElementById("hud")) {
-            this.updateHUD();
-          }
-        });
+        this.stateManager.listenPlayer(
+          sessionId,
+          "strokes",
+          (strokes: number) => {
+            this.localStrokes = strokes;
+            if (document.getElementById("hud")) {
+              this.updateHUD();
+            }
+          },
+        );
 
-        player.powerUps.onChange(() => {
-          this.updatePowerUpBar(Array.from(player.powerUps));
-        });
+        this.stateManager.listenPlayer(
+          sessionId,
+          "powerUps",
+          (powerUps: string[]) => {
+            this.updatePowerUpBar(powerUps);
+          },
+        );
 
-        player.listen("hasFog", (active: boolean) =>
+        this.stateManager.listenPlayer(sessionId, "hasFog", (active: boolean) =>
           this.effectsManager.setFog(active),
         );
-        player.listen("hasEarthquake", (active: boolean) =>
-          this.effectsManager.setEarthquake(active),
+        this.stateManager.listenPlayer(
+          sessionId,
+          "hasEarthquake",
+          (active: boolean) => this.effectsManager.setEarthquake(active),
         );
-        player.listen("hasTwistedAim", (active: boolean) => {
-          if (active) this.showNotification("Your aim is twisted!", "#FF9800");
-        });
-        player.listen("hasReversiball", (active: boolean) => {
-          if (active) this.showNotification("Your aim is reversed!", "#F44336");
-        });
-        player.listen("hasSuperSize", (active: boolean) => {
-          if (active)
-            this.showNotification("Your ball is SUPER SIZED!", "#E91E63");
-        });
-        player.listen("hasFunSize", (active: boolean) => {
-          if (active) this.showNotification("Your ball is tiny!", "#9C27B0");
-        });
-        player.listen("hasIceRink", (active: boolean) => {
-          if (active) this.showNotification("The floor is ice!", "#00BCD4");
-        });
+        this.stateManager.listenPlayer(
+          sessionId,
+          "hasTwistedAim",
+          (active: boolean) => {
+            if (active)
+              this.showNotification("Your aim is twisted!", "#FF9800");
+          },
+        );
+        this.stateManager.listenPlayer(
+          sessionId,
+          "hasReversiball",
+          (active: boolean) => {
+            if (active)
+              this.showNotification("Your aim is reversed!", "#F44336");
+          },
+        );
+        this.stateManager.listenPlayer(
+          sessionId,
+          "hasSuperSize",
+          (active: boolean) => {
+            if (active)
+              this.showNotification("Your ball is SUPER SIZED!", "#E91E63");
+          },
+        );
+        this.stateManager.listenPlayer(
+          sessionId,
+          "hasFunSize",
+          (active: boolean) => {
+            if (active) this.showNotification("Your ball is tiny!", "#9C27B0");
+          },
+        );
+        this.stateManager.listenPlayer(
+          sessionId,
+          "hasIceRink",
+          (active: boolean) => {
+            if (active) this.showNotification("The floor is ice!", "#00BCD4");
+          },
+        );
       }
     });
 
-    this.room.state.players.onRemove((_player: any, sessionId: string) => {
+    this.stateManager.onRemove((_player, sessionId) => {
       this.ballRenderer.removeBall(sessionId);
     });
 
-    // Timer updates
-    this.room.state.listen("holeTimeRemaining", (time: number) => {
+    // Ball position sync (high-frequency dedicated message)
+    this.stateManager.onBallSync((balls) => {
+      for (const [sessionId, pos] of Object.entries(balls)) {
+        this.ballRenderer.setTargetPosition(sessionId, pos.x, pos.y, pos.z);
+
+        if (sessionId === this.localSessionId) {
+          const ballPos = this.ballRenderer.getBallPosition(sessionId);
+          if (ballPos) {
+            this.cameraController.followBall(ballPos);
+            this.inputManager.setBallPosition(ballPos);
+          }
+        }
+      }
+    });
+
+    // Timer updates via state sync
+    this.stateManager.listenState("holeTimeRemaining", (time: number) => {
       this.updateTimer(time);
     });
 
     // Power-up messages
-    this.room.onMessage("powerups_spawned", (data: any[]) => {
-      this.powerUpRenderer.spawnPickups(data);
+    onMessage("powerups_spawned", (data: any) => {
+      this.powerUpRenderer.spawnPickups(data.powerups);
     });
 
-    this.room.onMessage("powerup_collected", (data: any) => {
+    onMessage("powerup_collected", (data: any) => {
       this.powerUpRenderer.removePickup(data.spawnId);
       if (data.playerId === this.localSessionId) {
         const def = POWERUP_CATALOG.find((p) => p.id === data.powerUpId);
@@ -323,8 +383,9 @@ export class Game {
       }
     });
 
-    this.room.onMessage("powerup_used", (data: any) => {
-      const player = this.room.state.players.get(data.playerId);
+    onMessage("powerup_used", (data: any) => {
+      const state = this.stateManager.getState();
+      const player = state?.players[data.playerId];
       if (player && data.playerId !== this.localSessionId) {
         const def = POWERUP_CATALOG.find((p) => p.id === data.powerUpId);
         if (
@@ -340,7 +401,7 @@ export class Game {
       }
     });
 
-    this.room.onMessage("effect_expired", (data: any) => {
+    onMessage("effect_expired", (data: any) => {
       if (data.playerId === this.localSessionId) {
         const def = POWERUP_CATALOG.find((p) => p.id === data.powerUpId);
         if (def) this.showNotification(`${def.name} wore off`, "#888");
@@ -348,7 +409,7 @@ export class Game {
     });
 
     // Hole start
-    this.room.onMessage("hole_start", (data: any) => {
+    onMessage("hole_start", (data: any) => {
       this.currentHoleNum = data.holeIndex + 1;
       this.currentPar = data.par;
       this.localStrokes = 0;
@@ -359,7 +420,7 @@ export class Game {
     });
 
     // Hole in
-    this.room.onMessage("hole_in", (data: any) => {
+    onMessage("hole_in", (data: any) => {
       if (data.strokes === 1) {
         this.showNotification(`HOLE IN ONE! ${data.username}`, "#FFD700");
         this.spawnConfetti();
@@ -386,53 +447,45 @@ export class Game {
     });
 
     // Hole end / leaderboard
-    this.room.onMessage("hole_end", (data: any) => {
+    onMessage("hole_end", (data: any) => {
       this.showLeaderboard(data.scores, data.par);
     });
 
     // Course end
-    this.room.onMessage("course_end", (data: any) => {
+    onMessage("course_end", (data: any) => {
       this.showFinalResults(data.scores, false);
     });
 
     // Tournament end
-    this.room.onMessage("tournament_end", (data: any) => {
+    onMessage("tournament_end", (data: any) => {
       this.showFinalResults(data.scores, true);
     });
 
     // Phase changes
-    this.room.state.listen("phase", (phase: string) => {
+    this.stateManager.listenState("phase", (phase: string) => {
       if (phase === "lobby") {
         this.showLobby();
       }
     });
 
-    this.room.state.listen("currentHole", (holeIndex: number) => {
+    this.stateManager.listenState("currentHole", (holeIndex: number) => {
       this.loadHole(holeIndex);
     });
   }
 
-  private updateBallTarget(sessionId: string, player: any) {
-    this.ballRenderer.setTargetPosition(
-      sessionId,
-      player.ballX,
-      player.ballY,
-      player.ballZ,
-    );
-
-    if (sessionId === this.localSessionId) {
-      const pos = this.ballRenderer.getBallPosition(sessionId);
-      if (pos) {
-        this.cameraController.followBall(pos);
-        this.inputManager.setBallPosition(pos);
-      }
-    }
-  }
-
   private async loadHole(holeIndex: number) {
     try {
-      const courseId = this.room.state.courseId;
-      const response = await fetch(`/colyseus/api/course/${courseId}`);
+      const state = this.stateManager.getState();
+      if (!state) return;
+      const courseId = state.courseId;
+
+      // In production, fetch through the PartyKit HTTP endpoint
+      const host = import.meta.env.VITE_PARTYKIT_HOST || "localhost:1999";
+      const protocol = import.meta.env.PROD ? "https" : "http";
+      const roomId = "default";
+      const response = await fetch(
+        `${protocol}://${host}/parties/main/${roomId}/course/${courseId}`,
+      );
       if (response.ok) {
         const course = await response.json();
         this.totalHoles = course.holes.length;
@@ -667,7 +720,6 @@ export class Game {
       `;
     }
 
-    // Return to lobby button (host only)
     html += `
       <button id="return-lobby-btn" style="
         margin-top:20px; background:linear-gradient(135deg,#4CAF50,#00BCD4); color:white;
@@ -680,17 +732,16 @@ export class Game {
     results.innerHTML = html;
     document.getElementById("ui-overlay")!.appendChild(results);
 
-    // Confetti for the winner
     if (scores.length > 0 && scores[0].sessionId === this.localSessionId) {
       this.spawnConfetti();
     }
 
-    // Show return button for host
     const returnBtn = document.getElementById("return-lobby-btn")!;
-    if (this.room.sessionId === (this.room.state as any).hostId) {
+    const state = this.stateManager.getState();
+    if (getSessionId() === state?.hostId) {
       returnBtn.style.display = "block";
       returnBtn.addEventListener("click", () => {
-        this.room.send("return_to_lobby");
+        send("return_to_lobby");
       });
     }
   }

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://www.partykit.io/schema.json",
+  "name": "putt-parking",
+  "main": "packages/server/src/index.ts",
+  "compatibilityDate": "2024-12-01"
+}

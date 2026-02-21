@@ -1,20 +1,19 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from "vite";
 
 export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/colyseus': {
-        target: 'http://localhost:2567',
-        ws: true,
+      "/api": {
+        target: "http://localhost:1999",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/colyseus/, ''),
+        rewrite: (path) => path.replace(/^\/api/, ""),
       },
     },
   },
   resolve: {
     alias: {
-      '@shared': '../shared/src',
+      "@shared": "../shared/src",
     },
   },
 });

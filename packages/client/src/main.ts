@@ -1,5 +1,13 @@
 import { initDiscord } from "./discord.js";
-import { connectToServer } from "./network.js";
+import {
+  connectToServer,
+  onStateSync,
+  onMessage,
+  getSessionId,
+  sendReady,
+  send,
+} from "./network.js";
+import { StateManager } from "./state/StateManager.js";
 import { Game } from "./game/Game.js";
 
 const loadingEl = document.getElementById("loading")!;
@@ -17,8 +25,16 @@ const COURSE_INFO: Record<
   "neon-nights": { name: "Neon Nights", theme: "Neon City", color: "#e040fb" },
   "pirate-cove": { name: "Pirate Cove", theme: "Tropical", color: "#f4d03f" },
   "candy-land": { name: "Candy Land", theme: "Sweet", color: "#ff69b4" },
-  "space-station": { name: "Space Station", theme: "Sci-Fi", color: "#42a5f5" },
-  "haunted-manor": { name: "Haunted Manor", theme: "Spooky", color: "#7e57c2" },
+  "space-station": {
+    name: "Space Station",
+    theme: "Sci-Fi",
+    color: "#42a5f5",
+  },
+  "haunted-manor": {
+    name: "Haunted Manor",
+    theme: "Spooky",
+    color: "#7e57c2",
+  },
 };
 
 async function main() {
@@ -35,7 +51,12 @@ async function main() {
       ? `https://cdn.discordapp.com/avatars/${auth.user.id}/${auth.user.avatar}.png`
       : `https://cdn.discordapp.com/embed/avatars/${parseInt(auth.user.id) % 5}.png`;
 
-    const room = await connectToServer(
+    // Set up state manager before connecting
+    const stateManager = new StateManager();
+    onStateSync((state) => stateManager.applyState(state));
+    onMessage("ball_sync", (data) => stateManager.handleBallSync(data.balls));
+
+    await connectToServer(
       channelId || "dev-channel",
       auth.user.id,
       auth.user.username,
@@ -44,12 +65,11 @@ async function main() {
 
     loadingEl.style.display = "none";
 
-    showLobbyUI(room);
-    const game = new Game(canvas, room);
+    showLobbyUI(stateManager);
+    const game = new Game(canvas, stateManager);
 
     window.addEventListener("beforeunload", () => {
       game.dispose();
-      room.leave();
     });
   } catch (err) {
     console.error("[PuttParking] Initialization failed:", err);
@@ -57,7 +77,7 @@ async function main() {
   }
 }
 
-function showLobbyUI(room: any) {
+function showLobbyUI(stateManager: StateManager) {
   const lobby = document.createElement("div");
   lobby.id = "lobby-ui";
   lobby.style.cssText = `
@@ -211,7 +231,7 @@ function showLobbyUI(room: any) {
   // Ready button
   const readyBtn = document.getElementById("ready-btn")!;
   readyBtn.addEventListener("click", () => {
-    room.send("ready");
+    sendReady();
     isReady = !isReady;
     readyBtn.textContent = isReady ? "Not Ready" : "Ready Up";
     readyBtn.style.background = isReady ? "#F44336" : "#4CAF50";
@@ -221,35 +241,45 @@ function showLobbyUI(room: any) {
   const startBtn = document.getElementById("start-btn")!;
   startBtn.addEventListener("click", () => {
     if (selectedMode === "tournament") {
-      room.send("start_game", { mode: "tournament", tournamentLength });
+      send("start_game", { mode: "tournament", tournamentLength });
     } else {
-      room.send("start_game", { courseId: selectedCourse });
+      send("start_game", { courseId: selectedCourse });
     }
   });
 
-  // Track players locally since Colyseus MapSchema iteration can be tricky
+  // Track players
   const knownPlayers = new Map<string, any>();
 
-  room.state.players.onAdd((player: any, sessionId: string) => {
+  stateManager.onAdd((player, sessionId) => {
     knownPlayers.set(sessionId, player);
     setTimeout(updatePlayers, 50);
   });
-  room.state.players.onRemove((_player: any, sessionId: string) => {
+  stateManager.onRemove((_player, sessionId) => {
     knownPlayers.delete(sessionId);
     setTimeout(updatePlayers, 50);
   });
 
-  // Update player list
   const updatePlayers = () => {
     const playerList = document.getElementById("player-list");
     if (!playerList) return;
-    let html = "";
-    let playerCount = 0;
 
-    knownPlayers.forEach((player, sessionId) => {
-      if (player.isSpectator) return;
-      playerCount++;
-      const isHost = sessionId === room.state.hostId;
+    const state = stateManager.getState();
+    if (!state) return;
+
+    // Refresh player data from latest state
+    for (const [sid, p] of Object.entries(state.players)) {
+      knownPlayers.set(sid, p);
+    }
+    // Remove stale
+    for (const sid of knownPlayers.keys()) {
+      if (!state.players[sid]) knownPlayers.delete(sid);
+    }
+
+    let html = "";
+
+    for (const [sessionId, player] of knownPlayers) {
+      if (player.isSpectator) continue;
+      const isHost = sessionId === state.hostId;
       const readyColor = player.isReady ? "#4CAF50" : "#555";
       const readyText = player.isReady ? "READY" : "waiting";
       html += `
@@ -263,7 +293,7 @@ function showLobbyUI(room: any) {
           <div style="font-size:11px; font-weight:600; color:${readyColor};">${readyText}</div>
         </div>
       `;
-    });
+    }
 
     playerList.innerHTML =
       html ||
@@ -271,7 +301,7 @@ function showLobbyUI(room: any) {
 
     // Show mode section and start button for host
     const modeSection = document.getElementById("mode-section")!;
-    if (room.sessionId === room.state.hostId) {
+    if (getSessionId() === state.hostId) {
       startBtn.style.display = "block";
       modeSection.style.display = "block";
     } else {
@@ -283,7 +313,7 @@ function showLobbyUI(room: any) {
   setInterval(updatePlayers, 500);
 
   // Phase changes
-  room.state.listen("phase", (phase: string) => {
+  stateManager.listenState("phase", (phase: string) => {
     if (phase === "playing" || phase === "starting") {
       lobby.style.display = "none";
     } else if (phase === "lobby") {
