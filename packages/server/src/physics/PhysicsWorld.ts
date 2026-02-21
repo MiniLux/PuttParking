@@ -1,4 +1,4 @@
-import * as CANNON from 'cannon-es';
+import * as CANNON from "cannon-es";
 import {
   GRAVITY,
   BALL_RADIUS,
@@ -15,7 +15,8 @@ import {
   RESTITUTION_ICE,
   FRICTION_RUBBER,
   RESTITUTION_RUBBER,
-} from '@putt-parking/shared';
+  RESTITUTION_WALL,
+} from "@putt-parking/shared";
 
 export class PhysicsWorld {
   world: CANNON.World;
@@ -36,39 +37,51 @@ export class PhysicsWorld {
     this.world.allowSleep = true;
 
     // Materials
-    this.ballMaterial = new CANNON.Material('ball');
-    this.grassMaterial = new CANNON.Material('grass');
-    this.sandMaterial = new CANNON.Material('sand');
-    this.iceMaterial = new CANNON.Material('ice');
-    this.rubberMaterial = new CANNON.Material('rubber');
-    this.wallMaterial = new CANNON.Material('wall');
+    this.ballMaterial = new CANNON.Material("ball");
+    this.grassMaterial = new CANNON.Material("grass");
+    this.sandMaterial = new CANNON.Material("sand");
+    this.iceMaterial = new CANNON.Material("ice");
+    this.rubberMaterial = new CANNON.Material("rubber");
+    this.wallMaterial = new CANNON.Material("wall");
 
     // Contact materials
-    this.world.addContactMaterial(new CANNON.ContactMaterial(
-      this.ballMaterial, this.grassMaterial,
-      { friction: FRICTION_GRASS, restitution: RESTITUTION_GRASS }
-    ));
-    this.world.addContactMaterial(new CANNON.ContactMaterial(
-      this.ballMaterial, this.sandMaterial,
-      { friction: FRICTION_SAND, restitution: RESTITUTION_SAND }
-    ));
-    this.world.addContactMaterial(new CANNON.ContactMaterial(
-      this.ballMaterial, this.iceMaterial,
-      { friction: FRICTION_ICE, restitution: RESTITUTION_ICE }
-    ));
-    this.world.addContactMaterial(new CANNON.ContactMaterial(
-      this.ballMaterial, this.rubberMaterial,
-      { friction: FRICTION_RUBBER, restitution: RESTITUTION_RUBBER }
-    ));
-    this.world.addContactMaterial(new CANNON.ContactMaterial(
-      this.ballMaterial, this.wallMaterial,
-      { friction: 0.1, restitution: 0.6 }
-    ));
+    this.world.addContactMaterial(
+      new CANNON.ContactMaterial(this.ballMaterial, this.grassMaterial, {
+        friction: FRICTION_GRASS,
+        restitution: RESTITUTION_GRASS,
+      }),
+    );
+    this.world.addContactMaterial(
+      new CANNON.ContactMaterial(this.ballMaterial, this.sandMaterial, {
+        friction: FRICTION_SAND,
+        restitution: RESTITUTION_SAND,
+      }),
+    );
+    this.world.addContactMaterial(
+      new CANNON.ContactMaterial(this.ballMaterial, this.iceMaterial, {
+        friction: FRICTION_ICE,
+        restitution: RESTITUTION_ICE,
+      }),
+    );
+    this.world.addContactMaterial(
+      new CANNON.ContactMaterial(this.ballMaterial, this.rubberMaterial, {
+        friction: FRICTION_RUBBER,
+        restitution: RESTITUTION_RUBBER,
+      }),
+    );
+    this.world.addContactMaterial(
+      new CANNON.ContactMaterial(this.ballMaterial, this.wallMaterial, {
+        friction: 0.1,
+        restitution: RESTITUTION_WALL,
+      }),
+    );
     // Ball-to-ball contact
-    this.world.addContactMaterial(new CANNON.ContactMaterial(
-      this.ballMaterial, this.ballMaterial,
-      { friction: 0.3, restitution: 0.5 }
-    ));
+    this.world.addContactMaterial(
+      new CANNON.ContactMaterial(this.ballMaterial, this.ballMaterial, {
+        friction: 0.3,
+        restitution: 0.5,
+      }),
+    );
   }
 
   addBall(id: string, x: number, y: number, z: number): CANNON.Body {
@@ -131,9 +144,11 @@ export class PhysicsWorld {
     position: { x: number; y: number; z: number },
     size: { x: number; y: number; z: number },
     rotation?: { x: number; y: number; z: number },
-    material?: CANNON.Material
+    material?: CANNON.Material,
   ): CANNON.Body {
-    const shape = new CANNON.Box(new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2));
+    const shape = new CANNON.Box(
+      new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2),
+    );
     const body = new CANNON.Body({
       mass: 0,
       shape,
