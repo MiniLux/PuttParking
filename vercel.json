@@ -1,5 +1,6 @@
 {
   "installCommand": "pnpm install",
   "buildCommand": "pnpm --filter shared build && pnpm --filter client build",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
