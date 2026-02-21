@@ -479,12 +479,9 @@ export class Game {
       if (!state) return;
       const courseId = state.courseId;
 
-      // In production, fetch through the PartyKit HTTP endpoint
-      const host = import.meta.env.VITE_PARTYKIT_HOST || "localhost:1999";
-      const protocol = import.meta.env.PROD ? "https" : "http";
-      const roomId = "default";
+      // In dev, use /api proxy; in prod, use /api which goes through Discord URL mapping
       const response = await fetch(
-        `${protocol}://${host}/parties/main/${roomId}/course/${courseId}`,
+        `/api/parties/main/default/course/${courseId}`,
       );
       if (response.ok) {
         const course = await response.json();
