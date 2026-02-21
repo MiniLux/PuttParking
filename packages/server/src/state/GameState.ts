@@ -78,7 +78,7 @@ export function createGameState(): GameStateData {
     phase: "lobby",
     gameMode: "casual",
     courseId: "",
-    currentHole: 0,
+    currentHole: -1,
     holeTimeRemaining: 60,
     courseIndex: 0,
     totalCourses: 1,

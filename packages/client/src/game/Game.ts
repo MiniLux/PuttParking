@@ -483,6 +483,7 @@ export class Game {
   }
 
   private async loadHole(holeIndex: number) {
+    if (holeIndex < 0) return;
     // Disable putting until course geometry is loaded
     this.inputManager.setCanPutt(false);
 
