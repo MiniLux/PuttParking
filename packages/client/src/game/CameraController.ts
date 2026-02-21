@@ -32,14 +32,13 @@ export class CameraController {
     const dz = holePosition.z - teePosition.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
 
-    // Point camera towards the hole from the tee
-    this.azimuth = Math.atan2(dx, dz);
-    this.elevation = 0.8;
-    this.distance = Math.max(2.5, dist * 0.6);
+    // Place camera behind the tee, looking toward the hole
+    this.azimuth = Math.atan2(-dx, -dz);
+    this.elevation = 0.6;
+    this.distance = 2;
 
-    const midX = (teePosition.x + holePosition.x) / 2;
-    const midZ = (teePosition.z + holePosition.z) / 2;
-    this.target.set(midX, 0, midZ);
+    // Target the tee position so we look from behind the ball toward the hole
+    this.target.set(teePosition.x, 0, teePosition.z);
   }
 
   /** Follow the player's ball */
