@@ -481,6 +481,9 @@ export class Game {
   }
 
   private async loadHole(holeIndex: number) {
+    // Disable putting until course geometry is loaded
+    this.inputManager.setCanPutt(false);
+
     try {
       const state = this.stateManager.getState();
       if (!state) return;
@@ -500,6 +503,12 @@ export class Game {
       }
     } catch (err) {
       console.error("[Game] Failed to load hole data:", err);
+    }
+
+    // Re-enable putting if ball is at rest
+    const localPlayer = this.stateManager.getPlayer(this.localSessionId);
+    if (localPlayer?.isBallAtRest && !localPlayer.hasFinishedHole) {
+      this.inputManager.setCanPutt(true);
     }
   }
 

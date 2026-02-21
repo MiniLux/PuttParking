@@ -10,14 +10,14 @@ export const MAX_POWERUPS_PER_PLAYER = 2;
 
 // Physics
 export const GRAVITY = -9.82;
-export const BALL_RADIUS = 0.02;
+export const BALL_RADIUS = 0.04;
 export const BALL_MASS = 0.045;
 export const BALL_LINEAR_DAMPING = 0.4;
 export const BALL_ANGULAR_DAMPING = 0.4;
 export const BALL_AT_REST_VELOCITY = 0.005;
 export const BALL_AT_REST_ANGULAR = 0.01;
-export const HOLE_RADIUS = 0.05;
-export const MAX_PUTT_POWER = 8;
+export const HOLE_RADIUS = 0.07;
+export const MAX_PUTT_POWER = 3;
 
 // Materials
 export const FRICTION_GRASS = 0.5;
