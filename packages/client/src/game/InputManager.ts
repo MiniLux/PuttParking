@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from "three";
+import type { CameraController } from "./CameraController.js";
 
 export interface PuttInput {
   dirX: number;
@@ -9,13 +10,21 @@ export interface PuttInput {
 export class InputManager {
   private canvas: HTMLCanvasElement;
   private camera: THREE.PerspectiveCamera;
+  private cameraController: CameraController | null = null;
   private raycaster = new THREE.Raycaster();
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
-  private isDragging = false;
+  // Putt drag state
+  private isPuttDragging = false;
   private dragStart = new THREE.Vector3();
   private dragCurrent = new THREE.Vector3();
   private maxDragDistance = 2;
+
+  // Camera drag state
+  private isCameraDragging = false;
+  private lastPointerX = 0;
+  private lastPointerY = 0;
+  private cameraSensitivity = 0.005;
 
   private aimArrow: HTMLDivElement | null = null;
   private powerBar: HTMLDivElement | null = null;
@@ -31,17 +40,24 @@ export class InputManager {
 
     this.createUI();
 
-    canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
-    canvas.addEventListener('pointermove', (e) => this.onPointerMove(e));
-    canvas.addEventListener('pointerup', (e) => this.onPointerUp(e));
-    canvas.addEventListener('pointerleave', () => this.onPointerCancel());
+    canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
+    canvas.addEventListener("pointermove", (e) => this.onPointerMove(e));
+    canvas.addEventListener("pointerup", (e) => this.onPointerUp(e));
+    canvas.addEventListener("pointerleave", () => this.onPointerCancel());
+    canvas.addEventListener("wheel", (e) => this.onWheel(e), {
+      passive: false,
+    });
+  }
+
+  setCameraController(controller: CameraController) {
+    this.cameraController = controller;
   }
 
   private createUI() {
-    const overlay = document.getElementById('ui-overlay')!;
+    const overlay = document.getElementById("ui-overlay")!;
 
     // Aim arrow
-    this.aimArrow = document.createElement('div');
+    this.aimArrow = document.createElement("div");
     this.aimArrow.style.cssText = `
       position: absolute; display: none; pointer-events: none;
       width: 4px; background: linear-gradient(to top, #4CAF50, #FFEB3B, #F44336);
@@ -50,14 +66,14 @@ export class InputManager {
     overlay.appendChild(this.aimArrow);
 
     // Power bar
-    this.powerBar = document.createElement('div');
+    this.powerBar = document.createElement("div");
     this.powerBar.style.cssText = `
       position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
       width: 200px; height: 16px; background: rgba(0,0,0,0.5);
       border-radius: 8px; overflow: hidden; display: none;
       border: 2px solid rgba(255,255,255,0.3);
     `;
-    this.powerFill = document.createElement('div');
+    this.powerFill = document.createElement("div");
     this.powerFill.style.cssText = `
       height: 100%; width: 0%; border-radius: 6px;
       background: linear-gradient(to right, #4CAF50, #FFEB3B, #F44336);
@@ -86,65 +102,105 @@ export class InputManager {
 
     this.raycaster.setFromCamera(new THREE.Vector2(x, y), this.camera);
     const intersection = new THREE.Vector3();
-    const hit = this.raycaster.ray.intersectPlane(this.groundPlane, intersection);
+    const hit = this.raycaster.ray.intersectPlane(
+      this.groundPlane,
+      intersection,
+    );
     return hit ? intersection : null;
   }
 
-  private onPointerDown(event: PointerEvent) {
-    if (!this.canPutt) return;
-
+  private isNearBall(event: PointerEvent): boolean {
     const worldPos = this.screenToGround(event);
-    if (!worldPos) return;
+    if (!worldPos) return false;
+    return worldPos.distanceTo(this.ballPosition) < 0.5;
+  }
 
-    // Check if click is near the ball
-    const dist = worldPos.distanceTo(this.ballPosition);
-    if (dist > 0.5) return;
+  private onPointerDown(event: PointerEvent) {
+    // If near ball and can putt → start putt drag
+    if (this.canPutt && this.isNearBall(event)) {
+      const worldPos = this.screenToGround(event)!;
+      this.isPuttDragging = true;
+      this.dragStart.copy(worldPos);
+      this.dragCurrent.copy(worldPos);
+      this.canvas.style.cursor = "grabbing";
+      if (this.powerBar) this.powerBar.style.display = "block";
+      return;
+    }
 
-    this.isDragging = true;
-    this.dragStart.copy(worldPos);
-    this.dragCurrent.copy(worldPos);
-    this.canvas.style.cursor = 'grabbing';
-
-    if (this.powerBar) this.powerBar.style.display = 'block';
+    // Otherwise → camera orbit drag
+    this.isCameraDragging = true;
+    this.lastPointerX = event.clientX;
+    this.lastPointerY = event.clientY;
+    this.canvas.style.cursor = "move";
   }
 
   private onPointerMove(event: PointerEvent) {
-    if (!this.isDragging) return;
+    if (this.isPuttDragging) {
+      const worldPos = this.screenToGround(event);
+      if (!worldPos) return;
+      this.dragCurrent.copy(worldPos);
+      this.updateAimVisuals();
+      return;
+    }
 
-    const worldPos = this.screenToGround(event);
-    if (!worldPos) return;
+    if (this.isCameraDragging && this.cameraController) {
+      const dx = event.clientX - this.lastPointerX;
+      const dy = event.clientY - this.lastPointerY;
+      this.lastPointerX = event.clientX;
+      this.lastPointerY = event.clientY;
 
-    this.dragCurrent.copy(worldPos);
-    this.updateAimVisuals();
+      this.cameraController.rotate(
+        -dx * this.cameraSensitivity,
+        dy * this.cameraSensitivity,
+      );
+    }
   }
 
   private onPointerUp(_event: PointerEvent) {
-    if (!this.isDragging) return;
-    this.isDragging = false;
-    this.canvas.style.cursor = 'default';
+    if (this.isPuttDragging) {
+      this.isPuttDragging = false;
+      this.canvas.style.cursor = "default";
 
-    const dx = this.dragStart.x - this.dragCurrent.x;
-    const dz = this.dragStart.z - this.dragCurrent.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
+      const dx = this.dragStart.x - this.dragCurrent.x;
+      const dz = this.dragStart.z - this.dragCurrent.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
 
-    if (dist > 0.05 && this.onPuttCallback) {
-      const power = Math.min(dist / this.maxDragDistance, 1);
-      const len = Math.sqrt(dx * dx + dz * dz);
-      this.onPuttCallback({
-        dirX: dx / len,
-        dirZ: dz / len,
-        power,
-      });
+      if (dist > 0.05 && this.onPuttCallback) {
+        const power = Math.min(dist / this.maxDragDistance, 1);
+        const len = Math.sqrt(dx * dx + dz * dz);
+        this.onPuttCallback({
+          dirX: dx / len,
+          dirZ: dz / len,
+          power,
+        });
+      }
+
+      this.hideAimVisuals();
+      return;
     }
 
-    this.hideAimVisuals();
+    if (this.isCameraDragging) {
+      this.isCameraDragging = false;
+      this.canvas.style.cursor = "default";
+    }
   }
 
   private onPointerCancel() {
-    if (this.isDragging) {
-      this.isDragging = false;
-      this.canvas.style.cursor = 'default';
+    if (this.isPuttDragging) {
+      this.isPuttDragging = false;
+      this.canvas.style.cursor = "default";
       this.hideAimVisuals();
+    }
+    if (this.isCameraDragging) {
+      this.isCameraDragging = false;
+      this.canvas.style.cursor = "default";
+    }
+  }
+
+  private onWheel(event: WheelEvent) {
+    event.preventDefault();
+    if (this.cameraController) {
+      this.cameraController.zoom(event.deltaY * 0.005);
     }
   }
 
@@ -169,7 +225,7 @@ export class InputManager {
       const arrowLength = Math.min(power * 100, 100);
       const angle = Math.atan2(-dx, -dz);
 
-      this.aimArrow.style.display = 'block';
+      this.aimArrow.style.display = "block";
       this.aimArrow.style.left = `${screenX}px`;
       this.aimArrow.style.top = `${screenY - arrowLength}px`;
       this.aimArrow.style.height = `${arrowLength}px`;
@@ -178,7 +234,7 @@ export class InputManager {
   }
 
   private hideAimVisuals() {
-    if (this.aimArrow) this.aimArrow.style.display = 'none';
-    if (this.powerBar) this.powerBar.style.display = 'none';
+    if (this.aimArrow) this.aimArrow.style.display = "none";
+    if (this.powerBar) this.powerBar.style.display = "none";
   }
 }

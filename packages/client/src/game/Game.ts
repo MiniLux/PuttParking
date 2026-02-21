@@ -52,6 +52,8 @@ export class Game {
     this.inputManager = new InputManager(canvas, this.sceneManager.camera);
     this.audio = new AudioManager();
 
+    this.inputManager.setCameraController(this.cameraController);
+
     this.inputManager.onPutt((input) => {
       sendPutt(input.dirX, input.dirZ, input.power);
       this.audio.playPutt(input.power);
