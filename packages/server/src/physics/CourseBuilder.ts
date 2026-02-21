@@ -1,7 +1,7 @@
-import * as CANNON from 'cannon-es';
-import type { Hole, Surface, Wall, Obstacle } from '@putt-parking/shared';
-import { PhysicsWorld } from './PhysicsWorld.js';
-import { HOLE_RADIUS } from '@putt-parking/shared';
+import * as CANNON from "cannon-es";
+import type { Hole, Surface, Wall, Obstacle } from "@putt-parking/shared";
+import { PhysicsWorld } from "./PhysicsWorld.js";
+import { HOLE_RADIUS } from "@putt-parking/shared";
 
 export class CourseBuilder {
   private physics: PhysicsWorld;
@@ -31,10 +31,14 @@ export class CourseBuilder {
 
   private getMaterial(materialName: string): CANNON.Material {
     switch (materialName) {
-      case 'sand': return this.physics.sandMaterial;
-      case 'ice': return this.physics.iceMaterial;
-      case 'rubber': return this.physics.rubberMaterial;
-      default: return this.physics.grassMaterial;
+      case "sand":
+        return this.physics.sandMaterial;
+      case "ice":
+        return this.physics.iceMaterial;
+      case "rubber":
+        return this.physics.rubberMaterial;
+      default:
+        return this.physics.grassMaterial;
     }
   }
 
@@ -75,12 +79,20 @@ export class CourseBuilder {
     const hz = hole.holePosition.z;
     const radius = HOLE_RADIUS;
 
-    return (ballX: number, ballY: number, ballZ: number, velocity: number): boolean => {
+    return (
+      ballX: number,
+      ballY: number,
+      ballZ: number,
+      velocity: number,
+    ): boolean => {
       const dx = ballX - hx;
       const dz = ballZ - hz;
       const dist = Math.sqrt(dx * dx + dz * dz);
-      // Ball must be close to hole horizontally, near ground level, and moving slowly
-      return dist < radius && Math.abs(ballY - hy) < 0.05 && velocity < 0.3;
+      // Ball must be close to hole horizontally, near ground level, and not too fast
+      // Use a generous radius so the ball doesn't just roll over the hole
+      return (
+        dist < radius * 1.8 && Math.abs(ballY - hy) < 0.15 && velocity < 1.0
+      );
     };
   }
 }
