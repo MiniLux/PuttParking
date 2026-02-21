@@ -253,6 +253,13 @@ export class Game {
       );
 
       // Listen for per-player state changes
+      if (isLocal) {
+        // Set initial putt ability based on current state
+        this.inputManager.setCanPutt(
+          player.isBallAtRest && !player.hasFinishedHole,
+        );
+      }
+
       this.stateManager.listenPlayer(
         sessionId,
         "isBallAtRest",

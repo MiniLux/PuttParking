@@ -194,6 +194,12 @@ export class GameManager {
     }
   }
 
+  /** Stop all loops (used when resetting room) */
+  stopAll() {
+    this.stopPhysicsLoop();
+    this.stopTimer();
+  }
+
   private updateBallStates() {
     if (!this.currentHole || !this.holeDetector) return;
 

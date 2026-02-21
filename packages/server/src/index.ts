@@ -160,6 +160,16 @@ export default class PuttParkingServer implements Party.Server, RoomAdapter {
     }
     delete this.state.players[conn.id];
 
+    // If no players remain, reset everything to lobby
+    const remainingPlayers = Object.keys(this.state.players).length;
+    if (remainingPlayers === 0) {
+      this.gameManager.stopAll();
+      this.state = createGameState();
+      this.nextColorIndex = 0;
+      console.log("[PuttParking] All players left, resetting to lobby");
+      return;
+    }
+
     if (this.state.hostId === conn.id) {
       const nextPlayer = Object.entries(this.state.players).find(
         ([, p]) => !p.isSpectator,
